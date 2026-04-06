@@ -48,7 +48,8 @@ ZERO_ACTION = {
     'g1_dex1': torch.zeros(16, dtype=torch.float32),
     'z1_dual_dex1_realsense': torch.zeros(14, dtype=torch.float32),
     'z1_realsense': torch.zeros(7, dtype=torch.float32),
-    'g1_brainco': torch.zeros(26, dtype=torch.float32),
+    # 12-dim: the model was trained on ee_state/ee_action (6 arm joints per arm, no hands).
+    'g1_brainco': torch.zeros(12, dtype=torch.float32),
 }
 CAM_KEY = {
     'g1_dex1': 'cam_right_high',
@@ -59,17 +60,48 @@ CAM_KEY = {
 # fmt: on
 
 
+def _g1_brainco_qpos_to_ee_state(qpos: np.ndarray) -> np.ndarray:
+    """Extract 12-dim ee_state from 26-dim g1_brainco qpos.
+
+    The training dataset stores ee_state as the first 6 joints of each arm
+    (qpos[0:6] = left, qpos[7:13] = right), matching the 12-dim normalizer
+    built from G1_WBT_Brainco_Pickup_Pillow.  The phantom wrist-yaw slots
+    (indices 6 and 13) and the 12 hand joints (indices 14-25) are omitted.
+    """
+    return np.concatenate([qpos[0:6], qpos[7:13]])
+
+
+def _g1_brainco_ee_action_to_qpos(ee_action: np.ndarray) -> np.ndarray:
+    """Map 12-dim predicted ee_action back to 26-dim qpos for robot execution.
+
+    Inserts zeros for phantom wrist-yaw slots (6 and 13) and keeps hands
+    fully open (zeros at indices 14-25).
+    """
+    qpos = np.zeros(26, dtype=np.float32)
+    qpos[0:6] = ee_action[0:6]    # left arm joints 0-5 (slot 5 = wrist pitch, ignored by hw)
+    # qpos[6] = 0.0                # left wrist yaw (phantom)
+    qpos[7:13] = ee_action[6:12]  # right arm joints 0-5
+    # qpos[13] = 0.0               # right wrist yaw (phantom)
+    # qpos[14:26] = 0.0            # hands open
+    return qpos
+
+
 def prepare_observation(args: argparse.Namespace, obs: Any) -> OrderedDict:
     """
     Convert a raw env observation into the model's expected input dict.
     """
     rgb_image = cv2.cvtColor(
         obs.observation["images"][CAM_KEY[args.robot_type]], cv2.COLOR_BGR2RGB)
+    if args.robot_type == 'g1_brainco':
+        # The model was trained on 12-dim ee_state (6 arm joints per arm, no hands).
+        state = _g1_brainco_qpos_to_ee_state(obs.observation["qpos"])
+    else:
+        state = obs.observation["qpos"]
     observation = {
         "observation.images.top":
         torch.from_numpy(rgb_image).permute(2, 0, 1),
         "observation.state":
-        torch.from_numpy(obs.observation["qpos"]),
+        torch.from_numpy(state),
         "action": ZERO_ACTION[args.robot_type],
     }
     return OrderedDict(observation)
@@ -111,6 +143,9 @@ def run_policy(
         # Execute the actions
         for n in range(args.exe_steps):
             action = actions[n].cpu().numpy()
+            if args.robot_type == 'g1_brainco':
+                # Model predicts 12-dim ee_action; expand to 26-dim for the robot controller.
+                action = _g1_brainco_ee_action_to_qpos(action)
             print(f">>> Exec => step {n} action: {action}", flush=True)
             print("---------------------------------------------")
 

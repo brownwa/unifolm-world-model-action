@@ -107,7 +107,7 @@ Open three SSH sessions to the robot (`ssh unitree@192.168.123.164`).
 conda activate g1brainco
 source ~/unitree_ros2/setup.sh
 source ~/unitree-g1-brainco-hand/ros2_stark_ws/install/setup.bash
-ros2 launch stark_bringup brainco_launch.py
+ros2 launch ros2_stark_controller stark_launch.py
 ```
 
 Wait for the stark_node to connect to both hands via `/dev/ttyUSB1` and `/dev/ttyUSB2` before proceeding.
