@@ -403,9 +403,21 @@ If the robot client prints `❌ Brainco bridge connect failed: [Errno 111] Conne
 
 ---
 
-## Arms whirring on startup (competing init poses)
+## Arms jerking and whirring on startup
 
-Two sources can fight over the arm target position at startup:
+**Root cause: robot in Ready Mode (Locked Standing)**
+
+If the robot is in Ready Mode (Locked Standing) when the robot client starts, the G1's built-in motion controller and `unitree_deploy`'s arm controller send competing control signals to the same joints. This produces constant jerking and whirring even before any inference action is executed.
+
+**Fix: switch the robot to Development Mode before running the client.**
+
+On the robot's App (or via the Unitree controller), select **Development Mode** before starting `robot_client.py`. Development Mode disables the built-in standing controller, giving `unitree_deploy` exclusive control over the joints. The jerking and whirring stop immediately.
+
+---
+
+**Secondary cause: competing init poses inside `unitree_deploy`**
+
+Even in Development Mode, two sources inside the code can fight over the arm target position at startup:
 1. `go_start()` in `G1_29_ArmController` drives to `G1ArmConfig.init_pose`
 2. `env.step(INIT_POSE[...])` in `robot_client.py` sends a target position immediately after
 
